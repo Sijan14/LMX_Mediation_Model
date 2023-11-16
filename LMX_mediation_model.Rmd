@@ -1,0 +1,120 @@
+---
+title: "LMX_mediation_model"
+author: "Allama Ikbal Sijan"
+date: "2023-09-22"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+## Installing and Loading Packages
+```{r, results='hide', warning=FALSE}
+chooseCRANmirror(ind = 1)
+install.packages("tidyverse")
+install.packages("psych")
+install.packages("ggplot2")
+install.packages("lavaan")
+library(tidyverse)
+library(psych)
+library(ggplot2)
+library(lavaan)
+```
+
+## Loading the dataset
+```{r, warning=FALSE}
+df <- read_csv("GenderMatchData.csv")
+```
+
+## Data Cleaning
+```{r}
+df <- df[ , c("tmkey", "tlkey", "gender", "age", "gender_l", "age_l", 
+              "lc1", "lc2", "lc3", "lc4", "lc5", "lc6", "lc7", "lc8",
+              "lmx1", "lmx2", "lmx3", "lmx4", "lmx5", "lmx6", "lmx7",
+              "as1", "as2", "as3", "as4", "as5", "as6", "as7")]
+
+df <- df %>% 
+  mutate(mean_lc = (lc1 + lc2 + lc3 + lc4 + lc5 + lc6 + lc7 + lc8) / 8,
+         mean_lmx = (lmx1 + lmx2 + lmx3 + lmx4 + lmx5 + lmx6 + lmx7) / 7,
+         mean_as = (as1 + as2 + as3 + as4 + as5 + as6 + as7) / 7)
+
+sum(is.na(df$mean_lmx))
+sum(is.na(df$mean_as))
+sum(is.na(df$mean_lc))
+
+df <- df %>% 
+  filter(mean_lc != "NA") %>% 
+  filter(mean_lmx != "NA") %>% 
+  filter(mean_as != "NA")
+
+df <- df %>% 
+  mutate(gender_match = case_when((gender == 3 & gender_l == 1) |
+                                    (gender == 4 & gender_l == 2) ~ 1, TRUE ~ 0))
+
+# 565 observation after cleaning (final sample size)
+```
+
+# Simple modeling (Trial)
+```{r}
+model_1 <- lm(mean_as ~ mean_lc, data = df)
+summary(model_1)
+
+model_2 <- lm(mean_as ~ mean_lc + mean_lmx, data = df)
+summary(model_2)
+
+model_3 <- lm(mean_as ~ mean_lc + mean_lmx * gender_match, data = df)
+summary(model_3)
+```
+
+## Multiple Group Path Model using LAVAAN (Final Model)
+```{r}
+df <- df %>% 
+  mutate(gen_mat4 = case_when(
+    gender == 3 & gender_l == 1 ~ "MM",
+    gender == 4 & gender_l == 2 ~ "FF",
+    gender == 3 & gender_l == 2 ~ "MF",
+    gender == 4 & gender_l == 1 ~ "FM"
+  ))
+df$gender_match <- as.numeric(df$gender_match)
+
+df$gen_mat4 <- factor(df$gen_mat4, ordered = TRUE, levels = c("MM", "FF", "MF", "FM"))
+
+MGmodel1 <- '
+  # Direct effects
+  mean_lmx ~ c(a1,a2, a3, a4)*mean_lc  
+  mean_as ~ mean_lc + c(b1,b2,b3,b4)*mean_lmx 
+  
+  # indirect effects
+  indirect1 := a1*b1
+  indirect2 := a2*b2
+  indirect3 := a3*b3
+  indirect4 := a4*b4
+  
+  # difference in indirect effect
+  indirect_diff1 := indirect1 - indirect2
+  indirect_diff2 := indirect1 - indirect3
+  indirect_diff3 := indirect1 - indirect4
+  indirect_diff4 := indirect2 - indirect3
+  indirect_diff5 := indirect2 - indirect4
+  indirect_diff6 := indirect3 - indirect4
+'
+fitMG1 <- sem(MGmodel1, data = df, group = "gen_mat4", se = "bootstrap", bootstrap = 5000)
+summary(fitMG1,  standardized = TRUE, rsq = TRUE)
+```
+## Checking Model Fit
+```{r}
+summary(fitMG1, fit.measures = TRUE)
+```
+
+## Model-fit
+# The CFI value of 1 and TL value of 1 suggests that model provides a perfect fit to the data compared to baseline model. The RMSEA value of 0 (which was 0.079 in the previous model I sent) and SRMR value of 0 (previously 0.042) suggests excellent fit to the data. 
+
+## Mediation effect
+# In Group 1 (FF), characterized by female coaches and female employees, as well as in Group 4 (MM), where both coach and employee genders are male, our findings demonstrate statistically significant mediation effects (p < 0.05). LMX serves as a mediator in the relationship between leadership coaching and adaptive selling for these gender-matched groups. We also notice a significant mediation effect for Group 3 (FM), where the employee is female and the manager is male but not for the Group 4 (MF), where the employee is male and the manager is female. To summarize, there is mediation effect of LMX on all the groups except for group 4 (MF).
+
+# I also calculated mediation differences between all the groups (MM, FF, FM, MF). Except for the difference between Group 1 (FF) and Group 3 (FM) {indirect_dff2}, all the other differences were non-significant. This suggests the mediating process through LMX operates similarly acorss almost all groups.
+
+## Group differences in mediation (Moderation effect)
+# By looking at the regression coefficients and corresponding p-values for each group, a moderation effect is noticed. This effect is particularly significant for Group 1 (FF) and Group 4 (MM) as the p< 0.02 for the mediator variable in both the groups. Surprisingly. for Group 2 (MF), female coaches and male employee, the effect is also significant (p = 0.037). For Group 3, the p-value suggests insignificant effect which supports the hypothesis. 
+
+
+
